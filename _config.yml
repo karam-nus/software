@@ -1,0 +1,84 @@
+title: "Software Engineering for ML — The Complete Guide"
+description: "Industry-standard software engineering principles, practices, and tools for ML practitioners and research teams"
+baseurl: "/software"
+url: "https://karam-nus.github.io"
+
+markdown: kramdown
+highlighter: rouge
+
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    css_class: "highlight"
+    span:
+      line_numbers: false
+    block:
+      line_numbers: false
+
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: false
+
+include:
+  - README.md
+
+navigation:
+  - title: "Home"
+    url: "/"
+  - title: "01 — Software Development Lifecycle"
+    url: "/01_software_development_lifecycle"
+  - title: "02 — Version Control with Git"
+    url: "/02_version_control_with_git"
+  - title: "03 — Code Quality & Style"
+    url: "/03_code_quality_and_style"
+  - title: "04 — Testing for ML Software"
+    url: "/04_testing_for_ml_software"
+  - title: "05 — Design Patterns"
+    url: "/05_design_patterns"
+  - title: "06 — OOP & Functional Design"
+    url: "/06_oop_and_functional_design"
+  - title: "07 — API Design & REST"
+    url: "/07_api_design_and_rest"
+  - title: "08 — Documentation"
+    url: "/08_documentation"
+  - title: "09 — Dependency & Package Management"
+    url: "/09_dependency_and_package_management"
+  - title: "10 — Build Systems & Automation"
+    url: "/10_build_systems_and_automation"
+  - title: "11 — Containerization & Reproducibility"
+    url: "/11_containerization_and_reproducibility"
+  - title: "12 — Configuration Management"
+    url: "/12_configuration_management"
+  - title: "13 — Logging, Monitoring & Observability"
+    url: "/13_logging_monitoring_and_observability"
+  - title: "14 — Error Handling & Debugging"
+    url: "/14_error_handling_and_debugging"
+  - title: "15 — Code Review & Collaboration"
+    url: "/15_code_review_and_collaboration"
+  - title: "16 — Software Architecture"
+    url: "/16_software_architecture"
+  - title: "17 — Performance & Profiling"
+    url: "/17_performance_and_profiling"
+  - title: "18 — Security Best Practices"
+    url: "/18_security_best_practices"
+  - title: "19 — Data Engineering Basics"
+    url: "/19_data_engineering_basics"
+  - title: "20 — ML System Design"
+    url: "/20_ml_system_design"
+  - title: "A — Package Management Deep Dive"
+    url: "/appendix_a_package_management"
+  - title: "B — Unix & Shell Essentials"
+    url: "/appendix_b_unix_and_shell"
+  - title: "C — VSCode Advanced Setup"
+    url: "/appendix_c_vscode_setup"
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
