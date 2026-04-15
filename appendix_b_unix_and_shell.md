@@ -1302,4 +1302,265 @@ chmod +x run_experiment.sh
 
 ---
 
+## B.14 rsync — Fast File Synchronisation
+
+`rsync` is the standard tool for transferring and syncing large files between local and remote machines. It sends only changed bytes, making repeated transfers of large datasets or checkpoints very efficient.
+
+```bash
+# Basic syntax
+rsync [options] source destination
+
+# Copy a local directory to a remote server (preserve permissions, compress, progress)
+rsync -avzP data/ user@server:/data/project/
+
+# Sync a remote checkpoint directory back to local
+rsync -avzP user@server:/outputs/run_01/ ./outputs/run_01/
+
+# Mirror a directory (delete files on destination that no longer exist on source)
+rsync -avz --delete data/ user@server:/data/project/
+
+# Dry run — show what would be transferred without doing it
+rsync -avzn data/ user@server:/data/project/
+
+# Use a non-standard SSH port
+rsync -avzP -e "ssh -p 2222" data/ user@server:/data/
+
+# Exclude patterns
+rsync -avz --exclude="*.pyc" --exclude="__pycache__/" src/ user@server:/app/src/
+
+# Include only specific file types
+rsync -avz --include="*.pt" --exclude="*" checkpoints/ user@server:/checkpoints/
+
+# Throttle bandwidth (KB/s) — useful on shared connections
+rsync -avzP --bwlimit=50000 datasets/ user@server:/datasets/
+```
+
+### Common rsync Flags
+
+| Flag | Meaning |
+|---|---|
+| `-a` | Archive mode (preserves permissions, timestamps, symlinks) |
+| `-v` | Verbose output |
+| `-z` | Compress data during transfer |
+| `-P` | Show progress + keep partial files on interruption |
+| `-n` | Dry run (no changes made) |
+| `--delete` | Remove destination files not in source |
+| `--exclude` | Skip matching files/directories |
+| `--bwlimit=N` | Limit bandwidth to N KB/s |
+
+### ML Workflow Examples
+
+```bash
+# Push latest checkpoint to remote storage
+rsync -avzP outputs/run_$(date +%Y%m%d)/ user@storage:/checkpoints/
+
+# Pull a shared dataset once — skip if already synced
+rsync -avz --ignore-existing /data/shared/ ./data/
+
+# Sync an entire experiment directory after training completes
+rsync -avzP user@gpu-server:/experiments/my_run/ ./experiments/my_run/
+```
+
+---
+
+## B.15 jq — JSON Processing
+
+`jq` is the standard command-line tool for parsing, filtering, and transforming JSON — essential for working with API responses, Hugging Face model cards, and config files.
+
+```bash
+# Install
+sudo apt install jq          # Ubuntu/Debian
+brew install jq              # macOS
+
+# Pretty-print JSON
+cat response.json | jq '.'
+curl https://api.example.com/data | jq '.'
+
+# Extract a field
+echo '{"loss": 0.42, "epoch": 10}' | jq '.loss'
+# → 0.42
+
+# Extract nested field
+jq '.training.learning_rate' config.json
+
+# Extract from an array
+jq '.[0]' results.json          # first element
+jq '.[-1]' results.json         # last element
+jq '.[] | .accuracy' results.json   # all accuracy values
+
+# Filter array by condition
+jq '.[] | select(.accuracy > 0.95)' results.json
+
+# Extract multiple fields as new object
+jq '{name: .model_name, acc: .accuracy}' results.json
+
+# Get keys of an object
+jq 'keys' config.json
+
+# Array length
+jq 'length' results.json
+
+# Compact output (no whitespace) — useful for piping
+jq -c '.' response.json
+
+# Update a value (non-destructive — prints modified JSON)
+jq '.training.epochs = 200' config.json > config_new.json
+
+# Iterate and format as plain text (-r strips quotes)
+jq -r '.[] | "\(.name): \(.score)"' results.json
+```
+
+### Practical ML Examples
+
+```bash
+# Parse Hugging Face model info
+curl -s "https://huggingface.co/api/models/bert-base-uncased" | jq '{id: .id, downloads: .downloads}'
+
+# Extract all loss values from a JSON-lines log
+cat training_log.jsonl | jq -r '.loss' | paste -sd',' -
+
+# Count experiments with accuracy above threshold
+cat results.json | jq '[.[] | select(.val_acc > 0.90)] | length'
+
+# Build a summary table
+cat results.json | jq -r '.[] | [.run_id, .val_acc, .epochs] | @tsv'
+```
+
+---
+
+## B.16 fzf — Fuzzy Finder
+
+`fzf` is an interactive fuzzy search tool for files, command history, and arbitrary lists. It dramatically speeds up navigation in large codebases and long command histories.
+
+```bash
+# Install
+sudo apt install fzf          # Ubuntu/Debian
+brew install fzf              # macOS
+git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf && ~/.fzf/install  # manual
+
+# Enable shell integration (add to ~/.bashrc or ~/.zshrc)
+[ -f ~/.fzf.bash ] && source ~/.fzf.bash   # bash
+[ -f ~/.fzf.zsh ]  && source ~/.fzf.zsh    # zsh
+```
+
+### Key Bindings (after shell integration)
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+r` | Fuzzy search command history |
+| `Ctrl+t` | Fuzzy search files and paste selection into command line |
+| `Alt+c` | Fuzzy search directories and `cd` into selection |
+
+### Command-Line Usage
+
+```bash
+# Interactively pick a file to open
+vim $(fzf)
+
+# Fuzzy search only Python files
+fzf --include="*.py"
+
+# Preview file contents while searching
+fzf --preview 'cat {}'
+
+# Preview with syntax highlighting (requires bat)
+fzf --preview 'bat --color=always {}'
+
+# Search from a list of strings
+echo -e "train\neval\ntest" | fzf
+
+# Kill a process interactively
+kill -9 $(ps aux | fzf | awk '{print $2}')
+
+# Checkout a git branch interactively
+git checkout $(git branch | fzf)
+
+# Open a recently modified file
+vim $(find . -name "*.py" -newer requirements.txt | fzf)
+```
+
+### Recommended ~/.bashrc / ~/.zshrc Config
+
+```bash
+# Use fd (faster find) as fzf's source if available
+export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+
+# Show file preview in Ctrl+t search
+export FZF_CTRL_T_OPTS="--preview 'bat --color=always --line-range :50 {}'"
+
+# Show directory tree preview in Alt+c search
+export FZF_ALT_C_OPTS="--preview 'tree -C {} | head -50'"
+```
+
+---
+
+## B.17 GNU parallel — Parallel Execution
+
+`GNU parallel` runs shell commands in parallel across CPU cores — far more flexible than `xargs -P` for complex workloads like batch preprocessing, hyperparameter sweeps, or running the same script over many files.
+
+```bash
+# Install
+sudo apt install parallel       # Ubuntu/Debian
+brew install parallel           # macOS
+
+# Basic syntax: parallel [options] command ::: arguments
+parallel echo ::: A B C D
+# → A  B  C  D  (all at once, order may vary)
+
+# Run a Python script on every CSV file using all CPU cores
+parallel python process.py {} ::: data/*.csv
+
+# Limit to N simultaneous jobs
+parallel -j4 python process.py {} ::: data/*.csv
+
+# Read arguments from a file (one per line)
+parallel -j4 python process.py {} :::: file_list.txt
+
+# Pass multiple arguments
+parallel python train.py --lr {1} --batch {2} ::: 0.001 0.0001 ::: 16 32
+
+# Log which jobs succeeded / failed
+parallel --joblog parallel.log python train.py {} ::: configs/*.yaml
+
+# Show progress bar
+parallel --progress python process.py {} ::: data/*.json
+
+# Retry failed jobs up to 3 times
+parallel --retries 3 python process.py {} ::: data/*.json
+
+# Resume from a previous log (skip already-completed jobs)
+parallel --resume --joblog parallel.log python train.py {} ::: configs/*.yaml
+```
+
+### ML Batch Processing Example
+
+```bash
+# Preprocess 1000 audio files using 8 cores
+ls raw_audio/*.wav | parallel -j8 python preprocess.py --input {} --output processed/{/.}.pt
+
+# Hyperparameter sweep: all combinations of LR × batch size
+parallel -j4 --joblog sweep.log \
+    python train.py --lr {1} --batch-size {2} --output results/lr{1}_bs{2}/ \
+    ::: 1e-3 1e-4 1e-5 \
+    ::: 16 32 64
+
+# Evaluate a saved model on multiple test sets
+parallel python eval.py --checkpoint best.pt --data {} ::: test_sets/*.json \
+    | tee eval_results.txt
+```
+
+### GNU parallel vs xargs
+
+| Feature | `xargs -P` | `GNU parallel` |
+|---|---|---|
+| Multiple argument sources | ✗ | ✓ |
+| Job logging | ✗ | ✓ |
+| Resume failed runs | ✗ | ✓ |
+| Progress display | ✗ | ✓ |
+| Retry on failure | ✗ | ✓ |
+| Argument replacement `{}` | Limited | Full |
+
+---
+
 *Last updated: April 2026*
