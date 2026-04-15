@@ -266,7 +266,525 @@ rsync -avz --partial --progress large_model.pt gpu-server:/models/
 
 ---
 
-## B.5 Text Processing
+## B.5 Passwordless SSH from Windows to Remote Linux
+
+Setting up passwordless (key-based) SSH access from a Windows machine to a remote Linux server is one of the most common tasks for ML engineers — whether the server is on your office intranet or an AWS EC2 instance on the internet. This section covers both scenarios end-to-end.
+
+<div class="diagram">
+<div class="diagram-title">SSH Key Authentication Flow</div>
+<div class="flow-h">
+  <div class="flow-node accent">🖥️ Windows PC <small>Private key stays here</small></div>
+  <div class="flow-arrow accent"></div>
+  <div class="flow-node green">🔐 SSH Handshake <small>Public key challenge</small></div>
+  <div class="flow-arrow accent"></div>
+  <div class="flow-node blue">🐧 Linux Server <small>Public key in authorized_keys</small></div>
+</div>
+</div>
+
+### Prerequisites — Enable OpenSSH on Windows
+
+Windows 10/11 ships with OpenSSH built in. Verify it works:
+
+```bash
+# Open PowerShell (or Windows Terminal) and check
+ssh -V
+# → OpenSSH_for_Windows_9.x ...
+
+# If not found, install via Settings → Apps → Optional Features → OpenSSH Client
+# Or via PowerShell (admin):
+Add-WindowsOptionalFeature -Online -FeatureName OpenSSH.Client
+```
+
+> **Tip**: Always use **Windows Terminal** or **PowerShell** — not the legacy Command Prompt. All commands below work in both PowerShell and Git Bash.
+
+### Scenario A — Intranet Linux Server (Password-Based Initially)
+
+This is the most common case: your GPU server is at `10.0.1.50` on the office network, and you currently log in with a password.
+
+**Step 1 — Generate an SSH key pair on Windows**
+
+```bash
+# Open PowerShell on your Windows PC
+ssh-keygen -t ed25519 -C "yourname@company.com"
+
+# When prompted:
+#   Enter file: press Enter for default (C:\Users\YourName\.ssh\id_ed25519)
+#   Enter passphrase: press Enter for no passphrase (or set one for extra security)
+
+# This creates two files:
+#   C:\Users\YourName\.ssh\id_ed25519       ← PRIVATE key (never share)
+#   C:\Users\YourName\.ssh\id_ed25519.pub   ← PUBLIC key (copy to server)
+```
+
+**Step 2 — Copy the public key to the Linux server**
+
+```bash
+# Method 1: Using ssh-copy-id (if available in Git Bash)
+ssh-copy-id mluser@10.0.1.50
+
+# Method 2: Manual copy (works in PowerShell — no ssh-copy-id needed)
+# First, display your public key:
+type $env:USERPROFILE\.ssh\id_ed25519.pub
+
+# Then SSH in with password one last time and add the key:
+ssh mluser@10.0.1.50
+
+# On the Linux server, run:
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "PASTE_YOUR_PUBLIC_KEY_HERE" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+exit
+```
+
+```bash
+# Method 3: One-liner from PowerShell (copies key in a single command)
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh mluser@10.0.1.50 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+**Step 3 — Test passwordless login**
+
+```bash
+# From PowerShell — should connect without asking for a password
+ssh mluser@10.0.1.50
+```
+
+**Step 4 — Set up SSH config for convenience**
+
+```bash
+# Create/edit: C:\Users\YourName\.ssh\config
+# (In PowerShell: notepad $env:USERPROFILE\.ssh\config)
+
+Host gpu-server
+    HostName 10.0.1.50
+    User mluser
+    IdentityFile C:\Users\YourName\.ssh\id_ed25519
+    ForwardAgent yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+
+Host gpu-server-2
+    HostName 10.0.1.51
+    User mluser
+    IdentityFile C:\Users\YourName\.ssh\id_ed25519
+```
+
+```bash
+# Now you can simply type:
+ssh gpu-server
+
+# Port forwarding for Jupyter also becomes cleaner:
+ssh -L 8888:localhost:8888 gpu-server
+```
+
+### Scenario B — AWS EC2 Instance (with .pem Key File)
+
+When you launch an EC2 instance, AWS gives you a `.pem` private key file. This replaces key generation — AWS already placed the matching public key on the instance.
+
+<div class="diagram">
+<div class="diagram-title">AWS EC2 SSH Flow</div>
+<div class="flow">
+  <div class="flow-node orange wide">📥 Download .pem from AWS Console</div>
+  <div class="flow-arrow accent"></div>
+  <div class="flow-node accent wide">🔒 Set correct permissions on .pem</div>
+  <div class="flow-arrow accent"></div>
+  <div class="flow-node green wide">🔑 SSH with -i flag pointing to .pem</div>
+  <div class="flow-arrow accent"></div>
+  <div class="flow-node blue wide">☁️ Connected to EC2 instance</div>
+</div>
+</div>
+
+**Step 1 — Move .pem file to your .ssh directory**
+
+```bash
+# Move the downloaded .pem file
+# In PowerShell:
+Move-Item "$env:USERPROFILE\Downloads\my-gpu-instance.pem" "$env:USERPROFILE\.ssh\my-gpu-instance.pem"
+```
+
+**Step 2 — Fix permissions (critical on Windows)**
+
+On Linux/macOS you'd run `chmod 400`. On Windows, you must restrict the file's ACL so only your user can read it — otherwise SSH refuses to use the key.
+
+```powershell
+# PowerShell — remove inherited permissions and grant only your user
+$keyPath = "$env:USERPROFILE\.ssh\my-gpu-instance.pem"
+
+# Remove all existing access rules
+icacls $keyPath /inheritance:r
+
+# Grant only your user read access
+icacls $keyPath /grant "${env:USERNAME}:(R)"
+
+# Verify — should show only your username
+icacls $keyPath
+```
+
+```bash
+# If using Git Bash or WSL instead, the standard Unix command works:
+chmod 400 ~/.ssh/my-gpu-instance.pem
+```
+
+**Step 3 — Connect to EC2**
+
+```bash
+# Direct connection (replace with your instance's public IP/DNS)
+ssh -i C:\Users\YourName\.ssh\my-gpu-instance.pem ubuntu@ec2-54-123-45-67.compute-1.amazonaws.com
+
+# Or with public IP directly
+ssh -i C:\Users\YourName\.ssh\my-gpu-instance.pem ubuntu@54.123.45.67
+```
+
+> **Note**: The default username depends on the AMI — `ubuntu` for Ubuntu, `ec2-user` for Amazon Linux, `admin` for Debian.
+
+**Step 4 — Add to SSH config (so you never type that again)**
+
+```bash
+# Add to C:\Users\YourName\.ssh\config
+
+Host aws-gpu
+    HostName 54.123.45.67
+    User ubuntu
+    IdentityFile C:\Users\YourName\.ssh\my-gpu-instance.pem
+    ForwardAgent yes
+    ServerAliveInterval 60
+    StrictHostKeyChecking no
+
+# If you have a bastion/jump host in your VPC:
+Host aws-gpu-private
+    HostName 10.0.1.100
+    User ubuntu
+    IdentityFile C:\Users\YourName\.ssh\my-gpu-instance.pem
+    ProxyJump aws-bastion
+
+Host aws-bastion
+    HostName 54.123.45.68
+    User ubuntu
+    IdentityFile C:\Users\YourName\.ssh\my-gpu-instance.pem
+```
+
+```bash
+# Now simply:
+ssh aws-gpu
+
+# Port forward Jupyter from EC2:
+ssh -L 8888:localhost:8888 aws-gpu
+
+# Copy model to EC2:
+scp model.pt aws-gpu:/home/ubuntu/models/
+
+# Rsync project to EC2:
+rsync -avz --exclude '.git' ./project/ aws-gpu:/home/ubuntu/project/
+```
+
+### Scenario C — Using Your Own Key with AWS (instead of .pem)
+
+If you prefer using the same `id_ed25519` key everywhere (rather than per-instance `.pem` files):
+
+```bash
+# 1. Generate your key (if you haven't already — see Scenario A, Step 1)
+ssh-keygen -t ed25519 -C "yourname@company.com"
+
+# 2. When launching an EC2 instance, choose "Import key pair" in the
+#    AWS Console → EC2 → Key Pairs, and upload your id_ed25519.pub
+
+# 3. Or, if the instance already exists, add your key manually:
+#    First, connect with the .pem file one time:
+ssh -i ~/.ssh/my-gpu-instance.pem ubuntu@54.123.45.67
+
+#    On the EC2 instance:
+echo "YOUR_ED25519_PUBLIC_KEY" >> ~/.ssh/authorized_keys
+
+#    Now you can connect with your own key:
+ssh ubuntu@54.123.45.67
+```
+
+### Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `Permission denied (publickey)` | Check key permissions, verify correct username, ensure public key is in `authorized_keys` |
+| `.pem` file "too open" error | Fix permissions with `icacls` (Windows) or `chmod 400` (Git Bash/WSL) |
+| `Connection refused` | Verify SSH is running on server (`sudo systemctl status sshd`), check security group (AWS) allows port 22 |
+| `Connection timed out` | Server is unreachable — check IP, VPN, AWS security group inbound rules |
+| `Host key verification failed` | Remove old entry: `ssh-keygen -R hostname`, or set `StrictHostKeyChecking no` in config |
+| Key works in Git Bash but not PowerShell | Ensure `ssh-agent` service is running: `Get-Service ssh-agent | Set-Service -StartupType Automatic; Start-Service ssh-agent` |
+
+### Starting ssh-agent on Windows (Persistent)
+
+```powershell
+# Run in PowerShell as Administrator (one-time setup)
+Get-Service ssh-agent | Set-Service -StartupType Automatic
+Start-Service ssh-agent
+
+# Add your key to the agent (so you don't need to specify -i every time)
+ssh-add $env:USERPROFILE\.ssh\id_ed25519
+
+# Or add the .pem file
+ssh-add $env:USERPROFILE\.ssh\my-gpu-instance.pem
+
+# List added keys
+ssh-add -l
+```
+
+---
+
+## B.6 Passwordless Git Operations (SSH-Based)
+
+Every time you `git push` or `git pull` and get asked for a password, you're wasting time. Set up SSH keys for Git once and never type credentials again.
+
+<div class="diagram">
+<div class="diagram-title">Git Authentication Methods</div>
+<div class="compare">
+  <div class="compare-side left">
+    <div class="compare-title">❌ HTTPS (Password/Token)</div>
+    <ul>
+      <li>git clone https://github.com/...</li>
+      <li>Prompts for username/token on every push</li>
+      <li>Must manage personal access tokens</li>
+      <li>Token can expire, needs renewal</li>
+    </ul>
+  </div>
+  <div class="compare-side right">
+    <div class="compare-title">✅ SSH (Key-Based)</div>
+    <ul>
+      <li>git clone git@github.com:...</li>
+      <li>Never prompted — key handles auth</li>
+      <li>One-time setup, works forever</li>
+      <li>Same key works for all repos</li>
+    </ul>
+  </div>
+</div>
+</div>
+
+### Setup for GitHub
+
+**Step 1 — Generate an SSH key (if you don't have one)**
+
+```bash
+# On Linux/macOS:
+ssh-keygen -t ed25519 -C "your.email@example.com"
+
+# On Windows (PowerShell):
+ssh-keygen -t ed25519 -C "your.email@example.com"
+# Default path: C:\Users\YourName\.ssh\id_ed25519
+```
+
+**Step 2 — Add the public key to GitHub**
+
+```bash
+# Display your public key
+# Linux/macOS:
+cat ~/.ssh/id_ed25519.pub
+
+# Windows (PowerShell):
+type $env:USERPROFILE\.ssh\id_ed25519.pub
+
+# Copy the entire output, then:
+# 1. Go to github.com → Settings → SSH and GPG keys → New SSH key
+# 2. Title: "My Work Laptop" (or any descriptive name)
+# 3. Key type: Authentication Key
+# 4. Paste the public key
+# 5. Click "Add SSH key"
+```
+
+**Step 3 — Test the connection**
+
+```bash
+ssh -T git@github.com
+# → Hi username! You've been authenticated, but GitHub does not provide shell access.
+# This means it's working!
+```
+
+**Step 4 — Clone repos using SSH URL (not HTTPS)**
+
+```bash
+# SSH URL format (use this):
+git clone git@github.com:your-org/ml-project.git
+
+# HTTPS URL format (avoid this):
+# git clone https://github.com/your-org/ml-project.git
+```
+
+### Switch Existing Repos from HTTPS to SSH
+
+If you already cloned a repo via HTTPS and get prompted for credentials:
+
+```bash
+# Check current remote URL
+git remote -v
+# → origin  https://github.com/your-org/ml-project.git (fetch)
+# → origin  https://github.com/your-org/ml-project.git (push)
+
+# Switch to SSH
+git remote set-url origin git@github.com:your-org/ml-project.git
+
+# Verify
+git remote -v
+# → origin  git@github.com:your-org/ml-project.git (fetch)
+# → origin  git@github.com:your-org/ml-project.git (push)
+
+# Test — should push without prompting for credentials
+git push
+```
+
+### Setup for GitLab (Self-Hosted or gitlab.com)
+
+```bash
+# Same key generation — your id_ed25519 key works for multiple services
+
+# Add key to GitLab:
+# Go to GitLab → Preferences → SSH Keys → Add new key
+# Paste the contents of id_ed25519.pub
+
+# Test connection
+ssh -T git@gitlab.com
+# For self-hosted: ssh -T git@gitlab.yourcompany.com
+
+# Clone with SSH
+git clone git@gitlab.com:your-org/ml-project.git
+# Self-hosted: git clone git@gitlab.yourcompany.com:your-org/ml-project.git
+```
+
+### Multiple Git Accounts (Personal + Work)
+
+If you have different SSH keys for personal and work GitHub/GitLab accounts:
+
+```bash
+# ~/.ssh/config (Linux/macOS) or C:\Users\YourName\.ssh\config (Windows)
+
+# Personal GitHub account
+Host github.com-personal
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_personal
+
+# Work GitHub account
+Host github.com-work
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_work
+
+# Work GitLab (self-hosted)
+Host gitlab.work
+    HostName gitlab.yourcompany.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_work
+```
+
+```bash
+# Clone using the alias from your SSH config:
+git clone git@github.com-personal:myuser/side-project.git
+git clone git@github.com-work:company/ml-platform.git
+git clone git@gitlab.work:team/training-pipeline.git
+
+# The SSH config tells Git which key to use for each host alias
+```
+
+### Setting Up on a Remote Linux Server
+
+When you SSH into a GPU server, you also want passwordless Git there (to push results, pull code, etc.). You have two options:
+
+**Option A — SSH Agent Forwarding (recommended)**
+
+Your local key is "forwarded" to the remote server — no need to copy keys.
+
+```bash
+# In your SSH config (local machine), ensure ForwardAgent is on:
+Host gpu-server
+    HostName 10.0.1.50
+    User mluser
+    IdentityFile ~/.ssh/id_ed25519
+    ForwardAgent yes     # ← This forwards your local SSH key
+
+# Now when you SSH in:
+ssh gpu-server
+
+# On the remote server, your GitHub key is available:
+ssh -T git@github.com
+# → Hi username! You've been authenticated ...
+
+# Git operations work without any key setup on the server:
+git clone git@github.com:your-org/ml-project.git
+git push origin main
+```
+
+> **Security note**: Only enable `ForwardAgent` for servers you trust. A compromised server could use your forwarded key.
+
+**Option B — Deploy Key (per-repo, read-only by default)**
+
+For automated systems or shared servers where agent forwarding isn't appropriate:
+
+```bash
+# On the remote server, generate a dedicated key:
+ssh-keygen -t ed25519 -C "gpu-server-deploy" -f ~/.ssh/deploy_key
+
+# Add the public key as a Deploy Key:
+# GitHub → Repo → Settings → Deploy keys → Add deploy key
+# Paste the contents of deploy_key.pub
+# Check "Allow write access" if the server needs to push
+
+# Configure Git to use this key for the specific repo:
+# In ~/.ssh/config on the server:
+Host github-deploy
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/deploy_key
+
+# Clone using the alias:
+git clone git@github-deploy:your-org/ml-project.git
+```
+
+### Git Config for Clean Commits
+
+After setting up SSH, configure your Git identity so commits are properly attributed:
+
+```bash
+# Set globally (applies to all repos)
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# Or per-repo (for work vs personal)
+cd ~/work/ml-project
+git config user.name "Your Name"
+git config user.email "your.work@company.com"
+
+# Verify
+git config --list --show-origin | grep user
+```
+
+### Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `git@github.com: Permission denied (publickey)` | Key not added to GitHub, or ssh-agent not running |
+| `ssh -T git@github.com` hangs | Firewall blocking port 22 — try SSH over HTTPS port: `ssh -T -p 443 git@ssh.github.com` |
+| Agent forwarding not working | Check `ForwardAgent yes` in config, and `AllowAgentForwarding yes` on server's `/etc/ssh/sshd_config` |
+| Wrong account used for push | Check SSH config aliases, use `ssh -T git@github.com-work` to verify which account connects |
+| `Could not open connection to auth agent` | Start the agent: `eval "$(ssh-agent -s)"` then `ssh-add` |
+| Key works for clone but not push | Deploy key might be read-only — enable write access in GitHub repo settings |
+
+### SSH over HTTPS Port (Firewall Bypass)
+
+Some corporate networks block port 22. GitHub supports SSH over port 443:
+
+```bash
+# Test if port 443 works
+ssh -T -p 443 git@ssh.github.com
+
+# If it works, add to SSH config:
+Host github.com
+    HostName ssh.github.com
+    Port 443
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+
+# Now all git operations use port 443 transparently
+git clone git@github.com:your-org/ml-project.git   # uses port 443
+```
+
+---
+
+## B.7 Text Processing
 
 ### grep — Search
 
@@ -352,7 +870,7 @@ find data/ -name "*.json" | xargs -P4 -I{} python process.py {}
 
 ---
 
-## B.6 Shell Scripting
+## B.8 Shell Scripting
 
 ### Variables and Quoting
 
@@ -501,7 +1019,7 @@ diff <(sort file1.txt) <(sort file2.txt)
 
 ---
 
-## B.7 tmux — Terminal Multiplexer
+## B.9 tmux — Terminal Multiplexer
 
 tmux lets you run persistent terminal sessions that survive disconnections — essential for long-running ML training on remote servers.
 
@@ -596,7 +1114,7 @@ tail -f outputs/training.log
 
 ---
 
-## B.8 Environment Configuration
+## B.10 Environment Configuration
 
 ### PATH and Environment Variables
 
@@ -651,7 +1169,7 @@ export HISTFILESIZE=200000
 
 ---
 
-## B.9 Cron Jobs — Scheduling Tasks
+## B.11 Cron Jobs — Scheduling Tasks
 
 ```bash
 # Edit crontab
@@ -684,7 +1202,7 @@ crontab -l
 
 ---
 
-## B.10 Disk & Network
+## B.12 Disk & Network
 
 ```bash
 # Disk usage
@@ -719,7 +1237,7 @@ unzip archive.zip                      # unzip
 
 ---
 
-## B.11 ML Job Submission Script
+## B.13 ML Job Submission Script
 
 A complete shell script combining many of the above concepts:
 
